@@ -8,18 +8,12 @@ the document corpus, with proper citations.
 """
 
 import logging
-import os
 
 from azure.core.exceptions import AzureError
 from quart import Quart, jsonify, request
 from quart_cors import cors
 
-from config_brain import (
-    CONFIG_BRAIN_APPROACH,
-    CONFIG_OPENAI_CLIENT,
-    CONFIG_PROMPT_MANAGER,
-    CONFIG_SEARCH_CLIENT,
-)
+from config_brain import load_config
 from load_azd_env import load_azd_env
 from models.brain_models import QueryError, QueryResponse
 from setup_brain import setup_brain_clients
@@ -37,30 +31,19 @@ def create_brain_app() -> Quart:
         """Initialize and store clients in app config on startup."""
         logger.info("Initializing Brain microservice...")
         try:
-            search_client, openai_client, prompt_manager, brain_approach = await setup_brain_clients(
-                search_service=os.getenv("AZURE_SEARCH_SERVICE", ""),
-                search_index_name=os.getenv("AZURE_SEARCH_INDEX", ""),
-                openai_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
-                openai_model=os.getenv("AZURE_OPENAI_MODEL", "gpt-4"),
-                openai_host=os.getenv("OPENAI_HOST", "azure"),
-                azure_openai_service=os.getenv("AZURE_OPENAI_SERVICE"),
-                azure_openai_api_key=os.getenv("AZURE_OPENAI_API_KEY_OVERRIDE"),
-                azure_openai_custom_url=os.getenv("AZURE_OPENAI_CUSTOM_URL"),
-                openai_api_key=os.getenv("OPENAI_API_KEY"),
-                search_key=os.getenv("AZURE_SEARCH_SERVICE_KEY"),
-                knowledgebase_enabled=os.getenv("USE_AGENTIC_KNOWLEDGEBASE", "false").lower() == "true",
-                knowledgebase_name=os.getenv("AZURE_SEARCH_KNOWLEDGEBASE", ""),
-                knowledgebase_model=os.getenv("AZURE_OPENAI_KNOWLEDGEBASE_MODEL"),
-                knowledgebase_deployment=os.getenv("AZURE_OPENAI_KNOWLEDGEBASE_DEPLOYMENT"),
-                use_web_source=os.getenv("USE_WEB_SOURCE", "false").lower() == "true",
-                use_sharepoint_source=os.getenv("USE_SHAREPOINT_SOURCE", "false").lower() == "true",
-                embedding_deployment=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
-            )
+            # Load and validate configuration from environment
+            config = load_config()
+            logger.info(f"Brain configuration loaded: search={config.search_service}, model={config.openai_model}")
 
-            app.config[CONFIG_SEARCH_CLIENT] = search_client
-            app.config[CONFIG_OPENAI_CLIENT] = openai_client
-            app.config[CONFIG_PROMPT_MANAGER] = prompt_manager
-            app.config[CONFIG_BRAIN_APPROACH] = brain_approach
+            # Set up all clients using the configuration
+            search_client, openai_client, prompt_manager, brain_approach = await setup_brain_clients(config=config)
+
+            # Store in app context for route handlers
+            app.search_client = search_client
+            app.openai_client = openai_client
+            app.prompt_manager = prompt_manager
+            app.brain_approach = brain_approach
+            app.config_brain = config
 
             logger.info("Brain microservice initialized successfully")
         except Exception as e:
@@ -107,8 +90,7 @@ def create_brain_app() -> Quart:
             return jsonify(QueryError(error="Query cannot be empty", code=400).__dict__), 400
 
         try:
-            brain_approach = app.config.get(CONFIG_BRAIN_APPROACH)
-            if not brain_approach:
+            if not hasattr(app, "brain_approach") or not app.brain_approach:
                 logger.error("Brain approach not initialized")
                 return jsonify(QueryError(error="Service not initialized", code=500).__dict__), 500
 
@@ -116,7 +98,7 @@ def create_brain_app() -> Quart:
             messages = [{"role": "user", "content": user_query}]
 
             # Run the search approach to get context
-            search_results = await brain_approach.run_search_approach(
+            search_results = await app.brain_approach.run_search_approach(
                 messages=messages,
                 overrides={
                     "retrieval_mode": "hybrid",
@@ -146,9 +128,9 @@ def create_brain_app() -> Quart:
                 source_page = first_source.get("sourcepage", "Unknown") if isinstance(first_source, dict) else "Unknown"
 
                 # Generate answer using GPT-4 with the retrieved context
-                openai_client = app.config.get(CONFIG_OPENAI_CLIENT)
-                openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
-                openai_model = os.getenv("AZURE_OPENAI_MODEL", "gpt-4")
+                openai_client = app.openai_client
+                openai_deployment = app.config_brain.openai_deployment
+                openai_model = app.config_brain.openai_model
 
                 system_prompt = f"""You are a helpful assistant that answers questions based on the provided context.
 Always provide accurate, concise answers grounded only in the provided context.
@@ -197,16 +179,14 @@ def main():
     # Configure logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
+    # Load configuration to get server settings
+    config = load_config()
+
     # Create the app
     app = create_brain_app()
 
-    # Run the app
-    host = os.getenv("BRAIN_HOST", "0.0.0.0")
-    port = int(os.getenv("BRAIN_PORT", "50505"))
-    debug = os.getenv("BRAIN_DEBUG", "false").lower() == "true"
-
-    logger.info(f"Starting Brain microservice on {host}:{port}")
-    app.run(host=host, port=port, debug=debug)
+    logger.info(f"Starting Brain microservice on {config.brain_host}:{config.brain_port}")
+    app.run(host=config.brain_host, port=config.brain_port, debug=config.brain_debug)
 
 
 if __name__ == "__main__":
