@@ -1,0 +1,19 @@
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.6.0
+
+# AI & LLM Orchestration
+langchain==0.1.0
+langchain-openai==0.0.5
+langchain-community==0.0.13
+
+# Vector Database Client
+azure-search-documents==11.4.0
+
+# PDF Parsing & Chunking
+pypdf==3.17.4
+tiktoken==0.5.2  # For counting tokens correctly
+
+# Environment Management
+python-dotenv==1.0.0
