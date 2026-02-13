@@ -17,6 +17,10 @@ If necessary, edit this file to ensure it accurately reflects the current state 
       * app/backend/approaches/prompts/chat_query_rewrite_tools.json: Tools used by the query rewriting prompt
       * app/backend/approaches/prompts/chat_answer.system.jinja2: Jinja2 template for the system message used by the Chat approach to answer questions
       * app/backend/approaches/prompts/chat_answer.user.jinja2: Jinja2 template for the user message used by the Chat approach, including sources
+    * app/backend/brain_app.py: Brain microservice API - stateless query endpoint with document retrieval and reasoning
+    * app/backend/config_brain.py: Configuration management for Brain microservice using Pydantic BaseModel with environment variable loading
+    * app/backend/setup_brain.py: Service initialization for Brain microservice (Azure clients, search, OpenAI, prompt manager)
+    * app/backend/models/brain_models.py: Pydantic data models for Brain API (QueryRequest, QueryResponse, QueryError)
     * app/backend/prepdocslib: Contains the document ingestion library used by both local and cloud ingestion
       * app/backend/prepdocslib/blobmanager.py: Manages uploads to Azure Blob Storage
       * app/backend/prepdocslib/cloudingestionstrategy.py: Builds the Azure AI Search indexer and skillset for the cloud ingestion pipeline
@@ -180,3 +184,79 @@ azd deploy document-extractor
 azd deploy figure-processor
 azd deploy text-processor
 ```
+
+## Running the Brain microservice
+
+The Brain microservice is a stateless API that handles document retrieval and question answering. It supports multiple LLM backends including Azure OpenAI, Hugging Face, and local models.
+
+### Local Development - Quick Start (Free)
+
+**Option 1: Local Mode with Ollama (No API keys needed)**
+
+```shell
+# Copy example configuration
+cp .env.example .env
+
+# Start a local LLM server (install ollama from ollama.com first)
+ollama run mistral
+
+# In another terminal, run the Brain microservice
+cd app/backend
+python brain_app.py
+```
+
+**Option 2: Hugging Face (Free API)**
+
+```shell
+# Get free token from https://huggingface.co/settings/tokens
+
+export AZURE_SEARCH_SERVICE=<your-search-service>
+export AZURE_SEARCH_INDEX=<your-search-index>
+export OPENAI_HOST=openai
+export OPENAI_API_KEY=hf_YOUR_HUGGING_FACE_TOKEN
+
+cd app/backend
+python brain_app.py
+```
+
+**Option 3: Azure OpenAI (Production)**
+
+```shell
+export AZURE_SEARCH_SERVICE=<your-search-service>
+export AZURE_SEARCH_INDEX=<your-search-index>
+export AZURE_OPENAI_SERVICE=<your-openai-service>
+export AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
+export AZURE_OPENAI_MODEL=gpt-4
+export OPENAI_API_VERSION=2024-02-01
+
+cd app/backend
+python brain_app.py
+```
+
+Test the `/query` endpoint:
+
+```shell
+curl -X POST http://localhost:50505/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is the main topic of the documents?"}'
+```
+
+### Architecture
+
+The Brain microservice consists of:
+
+* **brain_app.py**: Main Quart API server with `/health` and `/query` endpoints
+* **config_brain.py**: Pydantic-based configuration management with environment variable support and multi-LLM support
+* **setup_brain.py**: Initializes Azure clients (Search, OpenAI, etc.) required by the service
+* **models/brain_models.py**: Request/response data models with type validation
+
+### Supported LLM Providers
+
+| Provider | OPENAI_HOST | Setup | Cost |
+|----------|-------------|-------|------|
+| Azure OpenAI | `azure` | Need Azure subscription | Paid |
+| Hugging Face | `openai` | Free token from huggingface.co | Free/Paid |
+| Local (Ollama, vLLM) | `local` | Run local server | Free |
+| OpenAI API | `openai` | API key from openai.com | Paid |
+
+See [Brain API Documentation](docs/brain_api.md) for detailed API specifications, examples, and deployment options.

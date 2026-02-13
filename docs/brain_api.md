@@ -227,34 +227,109 @@ query("How do I reset the error?");
 
 ---
 
+## Code Structure
+
+The Brain microservice is composed of five core files (all in `app/backend/`):
+
+### **brain_app.py** - Main API Server
+The Quart web application that handles HTTP requests:
+- `GET /health` - Health check endpoint
+- `POST /query` - Main query endpoint that receives questions and returns answers
+- Startup initialization that loads configuration and sets up all Azure clients
+- Error handling and response formatting
+
+### **config_brain.py** - Configuration Management
+Uses Pydantic for type-safe configuration:
+- `BrainConfig` class that auto-loads from environment variables
+- Validates required fields on startup
+- Manages Azure Search, OpenAI, and server settings
+- `load_config()` function to load and validate configuration
+
+**Key environment variables managed:**
+```bash
+AZURE_SEARCH_SERVICE="your-service"
+AZURE_SEARCH_INDEX="your-index"
+AZURE_OPENAI_SERVICE="your-service"
+AZURE_OPENAI_DEPLOYMENT="gpt-4"
+AZURE_OPENAI_MODEL="gpt-4"
+OPENAI_HOST="azure"  # or "openai", "azure_custom", "local"
+BRAIN_HOST="0.0.0.0"
+BRAIN_PORT="50505"
+```
+
+### **setup_brain.py** - Service Initialization
+Wires up all Azure services on startup:
+- `setup_brain_clients(config)` - Single function that takes a `BrainConfig` and returns all initialized clients
+- Sets up Azure Search client (for document retrieval)
+- Sets up Azure OpenAI client (for the reasoning engine)
+- Initializes Prompt Manager (for Jinja2 templates)
+- Creates Brain approach (RAG orchestrator)
+- Optionally sets up knowledge base retrieval clients for agentic retrieval
+
+### **models/brain_models.py** - Data Models
+Dataclass definitions for request/response validation:
+- `QueryRequest` - Input: `{"query": "..."}`
+- `QueryResponse` - Output: `{"answer": "...", "citation": "...", "source_documents": [...]}`
+- `QueryError` - Error response: `{"error": "message", "code": 500}`
+
+### **tests/test_brain_api.py** - Automated Tests
+Comprehensive test suite:
+- Health check validation
+- Input validation (missing/empty queries)
+- Successful query processing with mocked services
+- No sources found scenarios
+- Source document inclusion
+- Error handling
+
+---
+
 ## Setup and Deployment
 
-### Local Development
+### Local Development - Quick Start (Free)
 
-1. **Install dependencies:**
+**Option 1: Stubbed Mode (Fastest)**
 
-   ```bash
-   cd app/backend
-   pip install -r requirements.txt
-   ```
+Run with a local mock endpoint - no API keys needed:
 
-2. **Set environment variables:**
+```bash
+cd app/backend
 
-   ```bash
-   export AZURE_SEARCH_SERVICE="your-search-service"
-   export AZURE_SEARCH_INDEX="your-index"
-   export AZURE_OPENAI_SERVICE="your-openai-service"
-   export AZURE_OPENAI_DEPLOYMENT="gpt-4"
-   export AZURE_OPENAI_MODEL="gpt-4"
-   ```
+# Copy example config
+cp ../../.env.example .env
 
-3. **Run the Brain service:**
+# Start a local LLM server using Ollama (install from ollama.com first)
+ollama run mistral
 
-   ```bash
-   python brain_app.py
-   ```
+# In another terminal, run Brain service
+python brain_app.py
+```
 
-   The service will start on `http://localhost:50505` by default.
+**Option 2: Hugging Face (Free API)**
+
+```bash
+# Get free token from https://huggingface.co/settings/tokens
+
+export AZURE_SEARCH_SERVICE="your-search-service"
+export AZURE_SEARCH_INDEX="your-index"
+export OPENAI_HOST=openai
+export OPENAI_API_KEY=hf_YOUR_HUGGING_FACE_TOKEN
+
+python brain_app.py
+```
+
+**Option 3: Azure OpenAI (Production)**
+
+```bash
+export AZURE_SEARCH_SERVICE="your-search-service"
+export AZURE_SEARCH_INDEX="your-index"
+export AZURE_OPENAI_SERVICE="your-openai-service"
+export AZURE_OPENAI_DEPLOYMENT="gpt-4"
+export AZURE_OPENAI_MODEL="gpt-4"
+
+python brain_app.py
+```
+
+The service will start on `http://localhost:50505` by default.
 
 ### Environment Variables
 
@@ -262,12 +337,13 @@ query("How do I reset the error?");
 |----------|----------|---------|-------------|
 | `AZURE_SEARCH_SERVICE` | Yes | - | Azure Search service name |
 | `AZURE_SEARCH_INDEX` | Yes | - | Search index name |
-| `AZURE_OPENAI_SERVICE` | Yes (for Azure) | - | Azure OpenAI service name |
-| `AZURE_OPENAI_DEPLOYMENT` | Yes | - | OpenAI deployment name |
-| `AZURE_OPENAI_MODEL` | Yes | gpt-4 | OpenAI model name |
-| `OPENAI_HOST` | No | azure | OpenAI host type (azure, openai, azure_custom, local) |
-| `OPENAI_API_KEY` | Conditional | - | API key for non-Azure OpenAI |
-| `AZURE_OPENAI_API_KEY_OVERRIDE` | No | - | Override API key for Azure OpenAI |
+| `OPENAI_HOST` | No | azure | LLM provider: `azure`, `openai`, `azure_custom`, `local` |
+| `AZURE_OPENAI_SERVICE` | Conditional | - | Required if OPENAI_HOST=azure |
+| `AZURE_OPENAI_DEPLOYMENT` | Conditional | - | Required if OPENAI_HOST=azure |
+| `AZURE_OPENAI_MODEL` | Conditional | gpt-4 | Model name (if using Azure) |
+| `OPENAI_API_KEY` | Conditional | - | API key for non-Azure OpenAI or Hugging Face |
+| `OPENAI_ENDPOINT` | Conditional | - | Custom endpoint for `local` mode |
+| `AZURE_OPENAI_API_KEY_OVERRIDE` | No | - | Override API key for Azure |
 | `BRAIN_HOST` | No | 0.0.0.0 | Host to bind to |
 | `BRAIN_PORT` | No | 50505 | Port to run on |
 | `BRAIN_DEBUG` | No | false | Debug mode (true/false) |
@@ -283,7 +359,15 @@ A Dockerfile is provided for containerized deployment:
 # Build
 docker build -t brain-service:latest -f app/backend/Dockerfile.brain .
 
-# Run
+# Run with Hugging Face (free)
+docker run -p 50505:50505 \
+  -e AZURE_SEARCH_SERVICE="your-service" \
+  -e AZURE_SEARCH_INDEX="your-index" \
+  -e OPENAI_HOST=openai \
+  -e OPENAI_API_KEY=hf_YOUR_TOKEN \
+  brain-service:latest
+
+# Run with Azure OpenAI
 docker run -p 50505:50505 \
   -e AZURE_SEARCH_SERVICE="your-service" \
   -e AZURE_SEARCH_INDEX="your-index" \

@@ -34,6 +34,7 @@ This template, the application code and configuration it contains, has been buil
 ## Table of Contents
 
 - [Features](#features)
+- [Architecture](#architecture-diagram)
 - [Azure account requirements](#azure-account-requirements)
   - [Cost estimation](#cost-estimation)
 - [Getting Started](#getting-started)
@@ -43,6 +44,8 @@ This template, the application code and configuration it contains, has been buil
 - [Deploying](#deploying)
   - [Deploying again](#deploying-again)
 - [Running the development server](#running-the-development-server)
+  - [Running the Brain microservice](#running-the-brain-microservice)
+  - [Running the full RAG application](#running-the-full-rag-application)
 - [Using the app](#using-the-app)
 - [Clean up](#clean-up)
 - [Guidance](#guidance)
@@ -58,14 +61,29 @@ The repo includes sample data so it's ready to try end to end. In this sample ap
 
 ## Features
 
-- Chat (multi-turn) interface
-- Renders citations and thought process for each answer
-- Includes settings directly in the UI to tweak the behavior and experiment with options
-- Integrates Azure AI Search for indexing and retrieval of documents, with support for [many document formats](/docs/data_ingestion.md#supported-document-formats) as well as [cloud data ingestion](/docs/data_ingestion.md#cloud-data-ingestion)
-- Optional usage of [multimodal models](/docs/multimodal.md) to reason over image-heavy documents
-- Optional addition of [speech input/output](/docs/deploy_features.md#enabling-speech-inputoutput) for accessibility
-- Optional automation of [user login and data access](/docs/login_and_acl.md) via Microsoft Entra
-- Performance tracing and monitoring with Application Insights
+- **Full-featured RAG Chat Application** with multi-turn conversation interface
+  - Renders citations and thought process for each answer
+  - Settings UI to tweak behavior and experiment with options
+  - Optional [multimodal models](/docs/multimodal.md) for image-heavy documents
+  - Optional [speech input/output](/docs/deploy_features.md#enabling-speech-inputoutput) for accessibility
+  - Optional [user login and data access control](/docs/login_and_acl.md) via Microsoft Entra
+  - Chat history with Azure Cosmos DB
+  - Performance tracing with Application Insights
+
+- **Brain Microservice** - A standalone, stateless API for intelligent document Q&A
+  - No authentication, no UI, no session management - just raw intelligence
+  - `POST /query` endpoint for question-answer pairs
+  - Automatic document search and retrieval
+  - GPT-4 powered reasoning with zero hallucination
+  - Source citations for every answer
+  - Horizontal scalability (stateless design)
+  - [Full API documentation here](/docs/brain_api.md)
+
+- **Enterprise-grade RAG Infrastructure**
+  - Integrates Azure AI Search for indexing and retrieval with [many document formats](/docs/data_ingestion.md#supported-document-formats)
+  - Support for [cloud data ingestion](/docs/data_ingestion.md#cloud-data-ingestion) at scale
+  - Pydantic-validated configuration management
+  - Comprehensive test suite for the Brain API
 
 ### Architecture Diagram
 
@@ -151,6 +169,8 @@ A related option is VS Code Dev Containers, which will open the project in your 
 
 ## Deploying
 
+**Don't have Azure keys yet?** You can run the [Brain microservice](#running-the-brain-microservice) locally with free LLMs like Hugging Face or Ollama without deploying to Azure.
+
 The steps below will provision Azure resources and deploy the application code to Azure Container Apps. To deploy to Azure App Service instead, follow [the app service deployment guide](docs/azure_app_service.md).
 
 1. Login to your Azure account:
@@ -202,6 +222,8 @@ azd up
 
 You can only run a development server locally **after** having successfully run the `azd up` command. If you haven't yet, follow the [deploying](#deploying) steps above.
 
+### Running the full RAG application
+
 1. Run `azd auth login` if you have not logged in recently.
 2. Start the server:
 
@@ -221,6 +243,55 @@ You can only run a development server locally **after** having successfully run 
 
 It's also possible to enable hotloading or the VS Code debugger.
 See more tips in [the local development guide](docs/localdev.md).
+
+### Running the Brain microservice
+
+The Brain microservice can run with different LLM backends. Choose one:
+
+#### Option 1: Stub/Local Mode (Fastest for Development)
+
+Run with a local mock endpoint (no API keys needed):
+
+```bash
+# Copy the example config
+cp .env.example .env
+
+# Start a local LLM server using Ollama (install from ollama.com first)
+ollama run mistral
+
+# In another terminal, run the Brain microservice
+cd app/backend
+python brain_app.py
+```
+
+Test the API:
+```bash
+curl -X POST http://localhost:50505/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is the torque setting?"}'
+```
+
+#### Option 2: Hugging Face (Free via API)
+
+1. Get a free API key from [huggingface.co](https://huggingface.co/settings/tokens)
+
+2. Set environment variables:
+
+  ```bash
+  export AZURE_SEARCH_SERVICE="your-search-service"
+  export AZURE_SEARCH_INDEX="your-search-index"
+  export OPENAI_HOST=openai
+  export OPENAI_API_KEY=hf_YOUR_HUGGING_FACE_TOKEN
+  ```
+
+3. Run the Brain microservice:
+
+  ```bash
+  cd app/backend
+  python brain_app.py
+  ```
+
+See the [Brain API documentation](docs/brain_api.md) for more details including Azure OpenAI and custom endpoint options.
 
 ## Using the app
 
@@ -247,6 +318,10 @@ The resource group and all the resources will be deleted.
 
 You can find extensive documentation in the [docs](docs/README.md) folder:
 
+- **Brain Microservice:**
+  - [Brain API Documentation](docs/brain_api.md) - Stateless API for document Q&A
+  - [Code Structure](docs/brain_api.md#code-structure) - Overview of Brain microservice architecture
+  - [Using Free LLMs](docs/free_llm_setup.md) - Ollama, Hugging Face, or vLLM (no Azure keys needed)
 - Deploying:
   - [Troubleshooting deployment](docs/deploy_troubleshooting.md)
     - [Debugging the app on App Service](docs/appservice.md)
